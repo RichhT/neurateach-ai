@@ -1,10 +1,9 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const { authMiddleware } = require('../middleware/auth');
 const { getOrCreateQuizBank, recordQuizBankCompletion } = require('../quiz-bank-manager');
+const { db } = require('../config/database');
 
 const router = express.Router();
-const db = new sqlite3.Database('./config/database.sqlite');
 
 // Generate questions for an objective (Assessment Agent)
 router.post('/generate-questions', authMiddleware, (req, res) => {

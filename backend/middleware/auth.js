@@ -1,7 +1,5 @@
 const jwt = require('jsonwebtoken');
-const sqlite3 = require('sqlite3').verbose();
-
-const db = new sqlite3.Database('./config/database.sqlite');
+const { db } = require('../config/database');
 
 const authMiddleware = (req, res, next) => {
   const token = req.header('Authorization')?.replace('Bearer ', '');

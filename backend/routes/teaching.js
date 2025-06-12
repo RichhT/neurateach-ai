@@ -1,9 +1,8 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const { authMiddleware } = require('../middleware/auth');
+const { db } = require('../config/database');
 
 const router = express.Router();
-const db = new sqlite3.Database('./config/database.sqlite');
 
 // XP calculation constants
 const XP_PER_MINUTE = 10;
