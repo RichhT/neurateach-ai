@@ -81,12 +81,87 @@ router.post('/start-session', authMiddleware, (req, res) => {
                 [enrollmentId, 'study_session_start', JSON.stringify([objectiveId])]
               );
 
-              res.json({ 
-                sessionId,
-                message: 'Study session started',
-                enrollmentId,
-                objectiveId
-              });
+              // Get the learning objective text for proactive teaching
+              db.get(
+                'SELECT objective_text FROM learning_objectives WHERE id = ?',
+                [objectiveId],
+                async (err, objective) => {
+                  if (err) {
+                    console.error('Error fetching objective:', err);
+                    return res.json({ 
+                      sessionId,
+                      message: 'Study session started',
+                      enrollmentId,
+                      objectiveId
+                    });
+                  }
+
+                  // Generate proactive AI teaching message to start the session
+                  try {
+                    const { generateTeachingResponse } = require('../ai-integration');
+                    
+                    const teachingContext = {
+                      studentMessage: '',  // Empty message indicates session start
+                      objectiveText: objective.objective_text,
+                      conversationHistory: [],
+                      studentProgress: {},
+                      sessionId
+                    };
+
+                    const initialTeaching = await generateTeachingResponse(teachingContext);
+
+                    // Add the AI's proactive message to the conversation
+                    db.run(
+                      'INSERT INTO teaching_conversations (study_session_id, message_sequence, speaker, message_content, teaching_technique) VALUES (?, ?, ?, ?, ?)',
+                      [sessionId, 1, 'ai', initialTeaching.message, initialTeaching.technique],
+                      (err) => {
+                        if (err) {
+                          console.error('Error saving initial AI message:', err);
+                        }
+                      }
+                    );
+
+                    res.json({ 
+                      sessionId,
+                      message: 'Study session started',
+                      enrollmentId,
+                      objectiveId,
+                      objectiveText: objective.objective_text,
+                      initialAIMessage: {
+                        message: initialTeaching.message,
+                        technique: initialTeaching.technique,
+                        isProactive: true
+                      }
+                    });
+
+                  } catch (error) {
+                    console.error('Error generating initial teaching response:', error);
+                    
+                    // Fallback to simple welcome message
+                    const fallbackMessage = `Welcome! I'm excited to help you learn about "${objective.objective_text}". What would you like to know first?`;
+                    
+                    // Add fallback message to conversation
+                    db.run(
+                      'INSERT INTO teaching_conversations (study_session_id, message_sequence, speaker, message_content, teaching_technique) VALUES (?, ?, ?, ?, ?)',
+                      [sessionId, 1, 'ai', fallbackMessage, 'proactive_welcome']
+                    );
+
+                    res.json({ 
+                      sessionId,
+                      message: 'Study session started',
+                      enrollmentId,
+                      objectiveId,
+                      objectiveText: objective.objective_text,
+                      initialAIMessage: {
+                        message: fallbackMessage,
+                        technique: 'proactive_welcome',
+                        isProactive: true,
+                        fallbackUsed: true
+                      }
+                    });
+                  }
+                }
+              );
             }
           );
         }
@@ -346,29 +421,102 @@ router.get('/active-session/:enrollmentId', authMiddleware, (req, res) => {
   );
 });
 
-// Simple AI teaching response (placeholder for actual AI integration)
-router.post('/get-ai-response', authMiddleware, (req, res) => {
+// AI teaching response using OpenAI and advanced pedagogical strategies
+router.post('/get-ai-response', authMiddleware, async (req, res) => {
   const { sessionId, studentMessage, objectiveText, conversationHistory } = req.body;
+  const studentId = req.user.userId;
 
-  // This is a placeholder - in production you'd call OpenAI, Claude, etc.
-  const responses = [
-    "That's a great question! Let me explain that concept in a different way...",
-    "I can see you're thinking about this correctly. Let's build on that understanding...",
-    "Let me give you an example that might help clarify this...",
-    "You're on the right track! Can you tell me what you think the next step would be?",
-    "That's exactly right! Now let's see how we can apply this to a more complex scenario...",
-    "I notice you might be unsure about this part. Let's break it down step by step..."
-  ];
+  try {
+    // Import the AI teaching function
+    const { generateTeachingResponse } = require('../ai-integration');
 
-  const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+    // Verify session ownership
+    const sessionCheck = await new Promise((resolve, reject) => {
+      db.get(
+        `SELECT ss.id, ss.enrollment_id, se.student_id 
+         FROM study_sessions ss
+         JOIN student_enrollments se ON ss.enrollment_id = se.id
+         WHERE ss.id = ? AND se.student_id = ?`,
+        [sessionId, studentId],
+        (err, session) => {
+          if (err) reject(err);
+          else resolve(session);
+        }
+      );
+    });
 
-  // In production, you'd analyze the student message and context to generate appropriate response
-  res.json({
-    aiResponse: randomResponse,
-    teachingTechnique: 'explanation',
-    comprehensionLevel: Math.random() * 0.3 + 0.6, // Random between 0.6-0.9
-    suggestedFollowUp: 'Would you like to try a practice problem to test your understanding?'
-  });
+    if (!sessionCheck) {
+      return res.status(404).json({ error: 'Study session not found or access denied' });
+    }
+
+    // Get student's progress data for context
+    const studentProgress = await new Promise((resolve, reject) => {
+      db.get(
+        'SELECT * FROM objective_progress WHERE enrollment_id = ?',
+        [sessionCheck.enrollment_id],
+        (err, progress) => {
+          if (err) reject(err);
+          else resolve(progress || {});
+        }
+      );
+    });
+
+    // Prepare context for AI teaching
+    const teachingContext = {
+      studentMessage: studentMessage || "Hello, I'm ready to learn!",
+      objectiveText,
+      conversationHistory: conversationHistory || [],
+      studentProgress,
+      sessionId
+    };
+
+    console.log('Generating AI teaching response for objective:', objectiveText);
+    console.log('Student message:', studentMessage);
+
+    // Generate AI teaching response
+    const teachingResponse = await generateTeachingResponse(teachingContext);
+
+    // Log the AI interaction for analysis
+    console.log('AI Teaching Response:', {
+      technique: teachingResponse.technique,
+      comprehension: teachingResponse.comprehensionAssessment,
+      confidence: teachingResponse.confidence
+    });
+
+    res.json({
+      aiResponse: teachingResponse.message,
+      teachingTechnique: teachingResponse.technique,
+      comprehensionLevel: teachingResponse.comprehensionAssessment,
+      suggestedFollowUp: teachingResponse.nextQuestion,
+      confidence: teachingResponse.confidence,
+      isAIGenerated: true
+    });
+
+  } catch (error) {
+    console.error('AI teaching response error:', error);
+    
+    // Enhanced fallback response based on context
+    let fallbackResponse;
+    const isFirstMessage = !studentMessage || studentMessage.trim() === '';
+    
+    if (isFirstMessage) {
+      fallbackResponse = `Welcome! Let's explore "${objectiveText}" together. To get started, what do you already know about this topic? Don't worry if it's not much - we'll build from wherever you are!`;
+    } else if (studentMessage && studentMessage.toLowerCase().includes('help')) {
+      fallbackResponse = `I understand you need help with "${objectiveText}". Let me break this down into smaller, manageable pieces. What specific aspect would you like me to explain first?`;
+    } else {
+      fallbackResponse = `That's a thoughtful response! Let's continue exploring "${objectiveText}". What aspect of this concept interests you most, or what would you like to understand better?`;
+    }
+
+    res.json({
+      aiResponse: fallbackResponse,
+      teachingTechnique: 'contextual_fallback',
+      comprehensionLevel: 0.7,
+      suggestedFollowUp: 'What questions do you have about this concept?',
+      confidence: 0.6,
+      isAIGenerated: false,
+      fallbackUsed: true
+    });
+  }
 });
 
 module.exports = router;

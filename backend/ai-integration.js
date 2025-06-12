@@ -355,9 +355,252 @@ function generateGenericQuestions(objectiveText, count) {
   ];
 }
 
+/**
+ * Generate AI teaching response using OpenAI
+ * @param {Object} context - Teaching context
+ * @param {string} context.studentMessage - What the student said
+ * @param {string} context.objectiveText - Current learning objective
+ * @param {Array} context.conversationHistory - Previous conversation
+ * @param {Object} context.studentProgress - Student's progress data
+ * @returns {Promise<Object>} Teaching response object
+ */
+async function generateTeachingResponse(context) {
+  const { studentMessage, objectiveText, conversationHistory = [], studentProgress = {} } = context;
+  
+  // Check if OpenAI is configured
+  if (!process.env.OPENAI_API_KEY) {
+    console.log('OpenAI API key not configured, using fallback response');
+    return generateContextualFallbackResponse(context);
+  }
+
+  // Build conversation context for AI
+  const recentHistory = conversationHistory.slice(-6); // Last 6 messages for context
+  const conversationContext = recentHistory.map(msg => 
+    `${msg.speaker}: ${msg.message_content}`
+  ).join('\n');
+
+  // Determine student comprehension level from conversation
+  const comprehensionSignals = analyzeComprehensionSignals(studentMessage, recentHistory);
+  
+  // Create teaching prompt
+  const teachingPrompt = createTeachingPrompt({
+    objectiveText,
+    studentMessage,
+    conversationContext,
+    comprehensionSignals,
+    conversationLength: conversationHistory.length
+  });
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert AI tutor with deep pedagogical knowledge. Your goal is to actively teach and guide students toward mastery of learning objectives using proven teaching strategies.
+
+TEACHING PRINCIPLES:
+- Use Socratic questioning to guide discovery
+- Provide scaffolded explanations (simple to complex)
+- Give concrete examples and analogies
+- Check for understanding frequently
+- Adapt your approach based on student responses
+- Be encouraging and patient
+- Turn mistakes into learning opportunities
+
+RESPONSE STYLE:
+- Be conversational and engaging
+- Ask thought-provoking questions
+- Provide clear, step-by-step explanations when needed
+- Use real-world examples to illustrate concepts
+- Encourage active thinking rather than passive listening
+
+Remember: You're not just answering questions - you're actively teaching and guiding learning.`
+        },
+        {
+          role: "user", 
+          content: teachingPrompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 800
+    });
+
+    const aiResponse = completion.choices[0].message.content;
+    
+    // Analyze the response to determine teaching technique used
+    const teachingTechnique = detectTeachingTechnique(aiResponse);
+    
+    // Assess comprehension based on response patterns
+    const comprehensionAssessment = assessStudentComprehension(studentMessage, comprehensionSignals);
+
+    return {
+      message: aiResponse,
+      technique: teachingTechnique,
+      comprehensionAssessment,
+      nextQuestion: generateFollowUpSuggestion(aiResponse, objectiveText),
+      confidence: 0.85
+    };
+
+  } catch (error) {
+    console.error('OpenAI teaching response error:', error);
+    
+    // Fallback to enhanced contextual response
+    return generateContextualFallbackResponse(context);
+  }
+}
+
+/**
+ * Create a detailed teaching prompt for the AI
+ */
+function createTeachingPrompt({ objectiveText, studentMessage, conversationContext, comprehensionSignals, conversationLength }) {
+  let prompt = `LEARNING OBJECTIVE: "${objectiveText}"
+
+STUDENT'S LATEST MESSAGE: "${studentMessage}"
+
+CONVERSATION CONTEXT:
+${conversationContext || 'This is the start of the conversation.'}
+
+COMPREHENSION SIGNALS:
+- Confidence level: ${comprehensionSignals.confidence}
+- Confusion indicators: ${comprehensionSignals.confusion}
+- Engagement level: ${comprehensionSignals.engagement}
+- Question type: ${comprehensionSignals.questionType}
+
+`;
+
+  // Add teaching strategy based on conversation stage
+  if (conversationLength === 0) {
+    prompt += `TEACHING STRATEGY: This is the first interaction. Start with an engaging hook related to the learning objective. Ask a thought-provoking question to gauge prior knowledge and spark curiosity.`;
+  } else if (comprehensionSignals.confusion === 'high') {
+    prompt += `TEACHING STRATEGY: Student shows confusion. Break down the concept into smaller parts. Use analogies or simpler examples. Ask clarifying questions to identify the specific point of confusion.`;
+  } else if (comprehensionSignals.confidence === 'high') {
+    prompt += `TEACHING STRATEGY: Student demonstrates understanding. Challenge them with deeper questions. Introduce related concepts or ask them to apply knowledge to new scenarios.`;
+  } else {
+    prompt += `TEACHING STRATEGY: Continue building understanding. Use Socratic questioning to guide discovery. Provide concrete examples and check comprehension frequently.`;
+  }
+
+  prompt += `\n\nProvide a response that actively teaches toward the learning objective. Be engaging, ask thoughtful questions, and adapt to the student's comprehension level.`;
+
+  return prompt;
+}
+
+/**
+ * Analyze student message for comprehension signals
+ */
+function analyzeComprehensionSignals(studentMessage, conversationHistory) {
+  const message = studentMessage.toLowerCase();
+  
+  // Confidence indicators
+  const confidenceIndicators = ['i understand', 'i think', 'i believe', 'makes sense', 'i see', 'so it means'];
+  const hasConfidence = confidenceIndicators.some(indicator => message.includes(indicator));
+  
+  // Confusion indicators  
+  const confusionIndicators = ['confused', "don't understand", "don't get", 'what does', 'what is', 'help', 'explain'];
+  const hasConfusion = confusionIndicators.some(indicator => message.includes(indicator));
+  
+  // Question indicators
+  const hasQuestion = message.includes('?') || message.startsWith('what') || message.startsWith('how') || message.startsWith('why');
+  
+  // Engagement indicators
+  const engagementIndicators = ['interesting', 'cool', 'wow', 'really', 'tell me more'];
+  const showsEngagement = engagementIndicators.some(indicator => message.includes(indicator));
+  
+  return {
+    confidence: hasConfidence ? 'high' : hasConfusion ? 'low' : 'medium',
+    confusion: hasConfusion ? 'high' : 'low',
+    engagement: showsEngagement || conversationHistory.length > 3 ? 'high' : 'medium',
+    questionType: hasQuestion ? (hasConfusion ? 'help-seeking' : 'curious') : 'statement'
+  };
+}
+
+/**
+ * Detect the teaching technique used in AI response
+ */
+function detectTeachingTechnique(response) {
+  const text = response.toLowerCase();
+  
+  if (text.includes('?') && (text.includes('what do you think') || text.includes('can you'))) {
+    return 'socratic_questioning';
+  } else if (text.includes('example') || text.includes('imagine') || text.includes('like')) {
+    return 'analogy_example';
+  } else if (text.includes('step') || text.includes('first') || text.includes('then')) {
+    return 'scaffolding';
+  } else if (text.includes('great') || text.includes('excellent') || text.includes('correct')) {
+    return 'positive_reinforcement';
+  } else {
+    return 'explanation';
+  }
+}
+
+/**
+ * Assess student comprehension based on signals
+ */
+function assessStudentComprehension(studentMessage, signals) {
+  let score = 0.5; // Start at neutral
+  
+  if (signals.confidence === 'high') score += 0.3;
+  else if (signals.confidence === 'low') score -= 0.2;
+  
+  if (signals.confusion === 'high') score -= 0.3;
+  
+  if (signals.engagement === 'high') score += 0.1;
+  
+  if (signals.questionType === 'curious') score += 0.1;
+  else if (signals.questionType === 'help-seeking') score -= 0.1;
+  
+  return Math.max(0.1, Math.min(1.0, score));
+}
+
+/**
+ * Generate follow-up suggestion
+ */
+function generateFollowUpSuggestion(aiResponse, objectiveText) {
+  const suggestions = [
+    "Would you like to try a practice problem to test your understanding?",
+    "Can you think of a real-world example where this might apply?",
+    "What questions do you have about this concept?",
+    "Should we explore a related aspect of this topic?",
+    "Would it help to see this concept from a different angle?"
+  ];
+  
+  return suggestions[Math.floor(Math.random() * suggestions.length)];
+}
+
+/**
+ * Enhanced fallback response when AI fails
+ */
+function generateContextualFallbackResponse(context) {
+  const { studentMessage, objectiveText, conversationHistory } = context;
+  
+  // Analyze what type of response is needed
+  const signals = analyzeComprehensionSignals(studentMessage, conversationHistory);
+  
+  let response;
+  
+  if (signals.questionType === 'help-seeking') {
+    response = `I understand you're looking for clarification on "${objectiveText}". Let me break this down step by step. What specific part would you like me to explain first?`;
+  } else if (signals.confidence === 'high') {
+    response = `Great! I can see you're grasping this concept. Now let's think about how "${objectiveText}" might apply in different situations. Can you think of an example?`;
+  } else if (conversationHistory.length === 0) {
+    response = `Welcome! Let's explore "${objectiveText}" together. To start, what do you already know about this topic? Don't worry if it's not much - we'll build from wherever you are!`;
+  } else {
+    response = `That's a thoughtful response! Let's continue exploring "${objectiveText}". What aspect of this concept interests you most, or what would you like to understand better?`;
+  }
+  
+  return {
+    message: response,
+    technique: 'contextual_response',
+    comprehensionAssessment: assessStudentComprehension(studentMessage, signals),
+    nextQuestion: "What would you like to explore next?",
+    confidence: 0.6
+  };
+}
+
 module.exports = {
   generateAIQuestions,
   generateQuestionsWithOpenAI,
   generateQuestionsWithClaude,
-  generateEnhancedMockQuestions
+  generateEnhancedMockQuestions,
+  generateTeachingResponse
 };
