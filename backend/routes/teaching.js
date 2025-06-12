@@ -98,6 +98,10 @@ router.post('/start-session', authMiddleware, (req, res) => {
 
                   // Generate proactive AI teaching message to start the session
                   try {
+                    console.log('Starting AI generation for session start...');
+                    console.log('Objective text:', objective.objective_text);
+                    console.log('Session ID:', sessionId);
+                    
                     const { generateTeachingResponse } = require('../ai-integration');
                     
                     const teachingContext = {
@@ -108,7 +112,9 @@ router.post('/start-session', authMiddleware, (req, res) => {
                       sessionId
                     };
 
+                    console.log('Calling generateTeachingResponse...');
                     const initialTeaching = await generateTeachingResponse(teachingContext);
+                    console.log('AI generation successful:', initialTeaching.technique);
 
                     // Add the AI's proactive message to the conversation
                     db.run(
@@ -494,6 +500,10 @@ router.post('/get-ai-response', authMiddleware, async (req, res) => {
 
   } catch (error) {
     console.error('AI teaching response error:', error);
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Stack trace:', error.stack);
+    console.error('Request context:', { sessionId, studentMessage: studentMessage?.substring(0, 100), objectiveText });
     
     // Enhanced fallback response based on context
     let fallbackResponse;
@@ -514,7 +524,8 @@ router.post('/get-ai-response', authMiddleware, async (req, res) => {
       suggestedFollowUp: 'What questions do you have about this concept?',
       confidence: 0.6,
       isAIGenerated: false,
-      fallbackUsed: true
+      fallbackUsed: true,
+      errorDetails: error.message // Add error details for debugging
     });
   }
 });
