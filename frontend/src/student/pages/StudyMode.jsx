@@ -168,9 +168,22 @@ function StudyMode() {
 
     } catch (error) {
       console.error('Failed to send message:', error);
+      console.error('Error response:', error.response?.data);
+      console.error('Error status:', error.response?.status);
+      
+      // More detailed error message for debugging
+      let errorDetails = 'Please try again.';
+      if (error.response?.data?.errorDetails) {
+        errorDetails = `Error: ${error.response.data.errorDetails}`;
+      } else if (error.response?.data?.error) {
+        errorDetails = `Error: ${error.response.data.error}`;
+      } else if (error.response?.status) {
+        errorDetails = `HTTP ${error.response.status}: ${error.response.statusText || 'Server error'}`;
+      }
+      
       const errorMessage = {
         speaker: 'agent',
-        message_content: 'Sorry, I encountered an error. Please try again.',
+        message_content: `Sorry, I encountered an error. ${errorDetails}`,
         teaching_technique: 'error',
         timestamp: new Date().toISOString()
       };
