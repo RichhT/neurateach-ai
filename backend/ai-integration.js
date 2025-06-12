@@ -379,16 +379,13 @@ async function generateTeachingResponse(context) {
     `${msg.speaker}: ${msg.message_content}`
   ).join('\n');
 
-  // Determine student comprehension level from conversation
-  const comprehensionSignals = analyzeComprehensionSignals(studentMessage, recentHistory);
-  
-  // Create teaching prompt
-  const teachingPrompt = createTeachingPrompt({
+  // Create comprehensive teaching prompt - let AI handle all analysis
+  const teachingPrompt = createAITeachingPrompt({
     objectiveText,
     studentMessage,
     conversationContext,
-    comprehensionSignals,
-    conversationLength: conversationHistory.length
+    conversationLength: conversationHistory.length,
+    studentProgress
   });
 
   try {
@@ -397,25 +394,34 @@ async function generateTeachingResponse(context) {
       messages: [
         {
           role: "system",
-          content: `You are an expert AI tutor with deep pedagogical knowledge. Your goal is to actively teach and guide students toward mastery of learning objectives using proven teaching strategies.
+          content: `You are an expert AI tutor. Your role is to actively teach students toward mastery of specific learning objectives.
 
-TEACHING PRINCIPLES:
-- Use Socratic questioning to guide discovery
-- Provide scaffolded explanations (simple to complex)
-- Give concrete examples and analogies
-- Check for understanding frequently
-- Adapt your approach based on student responses
-- Be encouraging and patient
-- Turn mistakes into learning opportunities
+CORE PRINCIPLES:
+- Take initiative in teaching - don't wait for students to choose what to learn
+- Start with engaging hooks, fascinating facts, or compelling scenarios 
+- Use proven pedagogical strategies: Socratic questioning, scaffolding, examples
+- Assess comprehension from student responses and adapt accordingly
+- Be encouraging but challenge students appropriately
+- Make learning interactive and engaging
 
-RESPONSE STYLE:
-- Be conversational and engaging
-- Ask thought-provoking questions
-- Provide clear, step-by-step explanations when needed
-- Use real-world examples to illustrate concepts
-- Encourage active thinking rather than passive listening
+RESPONSE FORMAT:
+Always respond with a JSON object containing:
+{
+  "message": "Your teaching response here",
+  "technique": "teaching_technique_used",
+  "comprehension_level": 0.0-1.0,
+  "next_suggestion": "What to do next"
+}
 
-Remember: You're not just answering questions - you're actively teaching and guiding learning.`
+TEACHING TECHNIQUES:
+- "proactive_introduction" - Starting with hooks and fascinating facts
+- "socratic_questioning" - Guiding discovery through questions
+- "scaffolding" - Breaking complex concepts into steps
+- "example_driven" - Using concrete examples and analogies
+- "challenge_extension" - Pushing students to deeper understanding
+- "confusion_clarification" - Addressing misconceptions
+
+Remember: You are the teacher - take charge of the learning experience!`
         },
         {
           role: "user", 
@@ -426,21 +432,37 @@ Remember: You're not just answering questions - you're actively teaching and gui
       max_tokens: 800
     });
 
-    const aiResponse = completion.choices[0].message.content;
+    const aiResponseText = completion.choices[0].message.content;
     
-    // Analyze the response to determine teaching technique used
-    const teachingTechnique = detectTeachingTechnique(aiResponse);
-    
-    // Assess comprehension based on response patterns
-    const comprehensionAssessment = assessStudentComprehension(studentMessage, comprehensionSignals);
-
-    return {
-      message: aiResponse,
-      technique: teachingTechnique,
-      comprehensionAssessment,
-      nextQuestion: generateFollowUpSuggestion(aiResponse, objectiveText),
-      confidence: 0.85
-    };
+    try {
+      // Parse AI's structured response
+      let cleanedResponse = aiResponseText.trim();
+      if (cleanedResponse.startsWith('```json')) {
+        cleanedResponse = cleanedResponse.replace(/```json\n?/, '').replace(/\n?```$/, '');
+      }
+      
+      const aiResponse = JSON.parse(cleanedResponse);
+      
+      return {
+        message: aiResponse.message,
+        technique: aiResponse.technique,
+        comprehensionAssessment: aiResponse.comprehension_level,
+        nextQuestion: aiResponse.next_suggestion,
+        confidence: 0.95
+      };
+      
+    } catch (parseError) {
+      console.log('AI response parsing failed, using raw response:', parseError.message);
+      
+      // Fallback to raw AI response if JSON parsing fails
+      return {
+        message: aiResponseText,
+        technique: 'ai_freeform',
+        comprehensionAssessment: 0.7,
+        nextQuestion: "What would you like to explore next?",
+        confidence: 0.8
+      };
+    }
 
   } catch (error) {
     console.error('OpenAI teaching response error:', error);
@@ -451,36 +473,29 @@ Remember: You're not just answering questions - you're actively teaching and gui
 }
 
 /**
- * Create a detailed teaching prompt for the AI
+ * Create AI-first teaching prompt - let AI handle all analysis and decisions
  */
-function createTeachingPrompt({ objectiveText, studentMessage, conversationContext, comprehensionSignals, conversationLength }) {
+function createAITeachingPrompt({ objectiveText, studentMessage, conversationContext, conversationLength, studentProgress }) {
   let prompt = `LEARNING OBJECTIVE: "${objectiveText}"
 
-STUDENT'S LATEST MESSAGE: "${studentMessage}"
+STUDENT MESSAGE: "${studentMessage || '[STARTING NEW SESSION]'}"
 
-CONVERSATION CONTEXT:
-${conversationContext || 'This is the start of the conversation.'}
+CONVERSATION HISTORY:
+${conversationContext || 'This is the start of a new study session.'}
 
-COMPREHENSION SIGNALS:
-- Confidence level: ${comprehensionSignals.confidence}
-- Confusion indicators: ${comprehensionSignals.confusion}
-- Engagement level: ${comprehensionSignals.engagement}
-- Question type: ${comprehensionSignals.questionType}
+SITUATION ANALYSIS:
+${conversationLength === 0 ? 
+  'NEW SESSION START - Take immediate initiative! Start teaching with an engaging hook.' : 
+  'ONGOING CONVERSATION - Analyze the student\'s response and adapt your teaching accordingly.'
+}
 
-`;
+INSTRUCTIONS:
+${conversationLength === 0 ? 
+  `Start teaching immediately with a fascinating fact, compelling example, or thought-provoking scenario about "${objectiveText}". DO NOT ask what they want to learn - dive right into the most interesting aspect and hook their curiosity!` :
+  `Analyze the student's response for comprehension signals and adapt your teaching. Respond to their specific message while continuing to guide them toward mastery of the learning objective.`
+}
 
-  // Add teaching strategy based on conversation stage
-  if (conversationLength === 0) {
-    prompt += `TEACHING STRATEGY: This is the first interaction. Start with an engaging hook related to the learning objective. Ask a thought-provoking question to gauge prior knowledge and spark curiosity.`;
-  } else if (comprehensionSignals.confusion === 'high') {
-    prompt += `TEACHING STRATEGY: Student shows confusion. Break down the concept into smaller parts. Use analogies or simpler examples. Ask clarifying questions to identify the specific point of confusion.`;
-  } else if (comprehensionSignals.confidence === 'high') {
-    prompt += `TEACHING STRATEGY: Student demonstrates understanding. Challenge them with deeper questions. Introduce related concepts or ask them to apply knowledge to new scenarios.`;
-  } else {
-    prompt += `TEACHING STRATEGY: Continue building understanding. Use Socratic questioning to guide discovery. Provide concrete examples and check comprehension frequently.`;
-  }
-
-  prompt += `\n\nProvide a response that actively teaches toward the learning objective. Be engaging, ask thoughtful questions, and adapt to the student's comprehension level.`;
+Respond with JSON format as specified in your system instructions.`;
 
   return prompt;
 }
@@ -568,32 +583,27 @@ function generateFollowUpSuggestion(aiResponse, objectiveText) {
 }
 
 /**
- * Enhanced fallback response when AI fails
+ * Minimal fallback when AI is completely unavailable
  */
 function generateContextualFallbackResponse(context) {
   const { studentMessage, objectiveText, conversationHistory } = context;
   
-  // Analyze what type of response is needed
-  const signals = analyzeComprehensionSignals(studentMessage, conversationHistory);
-  
   let response;
   
-  if (signals.questionType === 'help-seeking') {
-    response = `I understand you're looking for clarification on "${objectiveText}". Let me break this down step by step. What specific part would you like me to explain first?`;
-  } else if (signals.confidence === 'high') {
-    response = `Great! I can see you're grasping this concept. Now let's think about how "${objectiveText}" might apply in different situations. Can you think of an example?`;
-  } else if (conversationHistory.length === 0) {
-    response = `Welcome! Let's explore "${objectiveText}" together. To start, what do you already know about this topic? Don't worry if it's not much - we'll build from wherever you are!`;
+  if (conversationHistory.length === 0) {
+    response = `Let's dive into "${objectiveText}"! Here's something fascinating about this topic that will get us started...`;
+  } else if (studentMessage && studentMessage.toLowerCase().includes('help')) {
+    response = `I'm here to help you understand "${objectiveText}". Let me break this down into simpler parts for you.`;
   } else {
-    response = `That's a thoughtful response! Let's continue exploring "${objectiveText}". What aspect of this concept interests you most, or what would you like to understand better?`;
+    response = `That's a great response! Let's continue exploring "${objectiveText}" together.`;
   }
   
   return {
     message: response,
-    technique: 'contextual_response',
-    comprehensionAssessment: assessStudentComprehension(studentMessage, signals),
-    nextQuestion: "What would you like to explore next?",
-    confidence: 0.6
+    technique: 'simple_fallback',
+    comprehensionAssessment: 0.7,
+    nextQuestion: "Tell me what you're thinking about this.",
+    confidence: 0.5
   };
 }
 
