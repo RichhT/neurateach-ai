@@ -15,7 +15,7 @@ function TeacherRoute({ children }) {
   }
   
   if (!user) {
-    return <Navigate to="/" />;
+    return <Navigate to="" />;
   }
   
   if (user.userType !== 'teacher') {
@@ -34,7 +34,7 @@ function WelcomeRoute({ children }) {
   }
   
   if (user && user.userType === 'teacher') {
-    return <Navigate to="/dashboard" />;
+    return <Navigate to="dashboard" />;
   }
   
   if (user && user.userType !== 'teacher') {
@@ -48,7 +48,7 @@ function WelcomeRoute({ children }) {
 function TeacherApp() {
   return (
     <AuthProvider>
-      <Router>
+      <Router basename="/teacher">
         <div className="App">
           <Routes>
             <Route path="/" element={

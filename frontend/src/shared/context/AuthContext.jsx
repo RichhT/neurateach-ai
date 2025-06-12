@@ -47,10 +47,10 @@ export function AuthProvider({ children }) {
           
           if (user.userType === 'student' && currentPath.includes('teacher')) {
             console.log('AuthContext: Redirecting student to student dashboard');
-            window.location.href = `${currentHost}/student.html#/dashboard`;
+            window.location.href = `${currentHost}/student/dashboard`;
           } else if (user.userType === 'teacher' && currentPath.includes('student')) {
             console.log('AuthContext: Redirecting teacher to teacher dashboard');
-            window.location.href = `${currentHost}/teacher.html#/dashboard`;
+            window.location.href = `${currentHost}/teacher/dashboard`;
           }
         })
         .catch(error => {
@@ -83,12 +83,12 @@ export function AuthProvider({ children }) {
       if (user.userType === 'student') {
         console.log('AuthContext: Redirecting to student dashboard');
         setTimeout(() => {
-          window.location.href = `${window.location.origin}/student.html#/dashboard`;
+          window.location.href = `${window.location.origin}/student/dashboard`;
         }, 100);
       } else if (user.userType === 'teacher') {
         console.log('AuthContext: Redirecting to teacher dashboard');
         setTimeout(() => {
-          window.location.href = `${window.location.origin}/teacher.html#/dashboard`;
+          window.location.href = `${window.location.origin}/teacher/dashboard`;
         }, 100);
       }
       
@@ -115,9 +115,9 @@ export function AuthProvider({ children }) {
       
       // Redirect to appropriate app based on user type
       if (user.userType === 'student') {
-        window.location.href = `${window.location.origin}/student.html#/dashboard`;
+        window.location.href = `${window.location.origin}/student/dashboard`;
       } else if (user.userType === 'teacher') {
-        window.location.href = `${window.location.origin}/teacher.html#/dashboard`;
+        window.location.href = `${window.location.origin}/teacher/dashboard`;
       }
       
       return { success: true };
