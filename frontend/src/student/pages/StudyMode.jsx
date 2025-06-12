@@ -77,23 +77,37 @@ function StudyMode() {
         
         setSessionData(sessionRes.data);
         
-        // Add welcome message
-        const welcomeMessage = {
-          speaker: 'agent',
-          message_content: `Hello ${user.name}! 👋 Let's work on: "${targetObjective.objective_text}". What would you like to learn about this topic?`,
-          teaching_technique: 'welcome',
-          timestamp: new Date().toISOString()
-        };
-        
-        setMessages([welcomeMessage]);
-        
-        // Log the welcome message
-        await axios.post('/api/teaching/add-message', {
-          sessionId: sessionRes.data.sessionId,
-          speaker: 'agent',
-          message: welcomeMessage.message_content,
-          teachingTechnique: 'welcome'
-        });
+        // Use AI-generated initial message from backend
+        if (sessionRes.data.initialAIMessage) {
+          const aiWelcomeMessage = {
+            speaker: 'agent',
+            message_content: sessionRes.data.initialAIMessage.message,
+            teaching_technique: sessionRes.data.initialAIMessage.technique,
+            timestamp: new Date().toISOString()
+          };
+          
+          setMessages([aiWelcomeMessage]);
+          console.log('Using AI-generated welcome message:', aiWelcomeMessage.message_content);
+        } else {
+          // Fallback message if no AI message provided
+          const fallbackMessage = {
+            speaker: 'agent',
+            message_content: `Hello ${user.name}! 👋 Ready to explore "${targetObjective.objective_text}"? Let's dive right in!`,
+            teaching_technique: 'fallback_welcome',
+            timestamp: new Date().toISOString()
+          };
+          
+          setMessages([fallbackMessage]);
+          console.log('Using fallback welcome message');
+          
+          // Log the fallback message
+          await axios.post('/api/teaching/add-message', {
+            sessionId: sessionRes.data.sessionId,
+            speaker: 'agent',
+            message: fallbackMessage.message_content,
+            teachingTechnique: 'fallback_welcome'
+          });
+        }
       }
     } catch (error) {
       console.error('Failed to initialize study session:', error);
